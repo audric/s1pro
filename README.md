@@ -23,7 +23,7 @@ Developed and tested against one radio: S1 Pro, 400-470 MHz, firmware A1.2.04.00
 - Most columns show the radio's stored numbers. Frequencies (MHz) and tones (Hz) are converted.
 - Adding and deleting whole zones is untested.
 - Radio-wide settings (power, keys, tones, language) are not editable yet.
-- Linux only for now (uses BlueZ). macOS and Windows need a different Bluetooth backend.
+- Linux only for now, PC and Raspberry Pi (uses BlueZ). macOS and Windows need a different Bluetooth backend.
 
 This tool writes to your radio's configuration. The commands were learned by observing the
 official app, not from documentation, so use it at your own risk and keep a saved copy of a
@@ -31,10 +31,19 @@ known-good configuration.
 
 ## Build
 
-Linux, including 64-bit Raspberry Pi OS:
+Runs on Linux: a PC (x86_64) or a Raspberry Pi with 64-bit Raspberry Pi OS (arm64). The same
+script builds for whichever machine you run it on:
+
+    ./build.sh
+
+It tells you if anything is missing. On Debian, Ubuntu and Raspberry Pi OS the dependencies are:
 
     sudo apt install g++ cmake ninja-build qt6-base-dev
-    ./build.sh
+
+Running it also needs BlueZ, the standard Linux Bluetooth service (package `bluez`).
+
+Ready-made binaries for both architectures are produced by the GitHub Actions build of each
+commit.
 
 ## Use
 
