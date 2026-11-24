@@ -31,10 +31,11 @@ known-good configuration.
 
 ## Download
 
-Every commit is built by GitHub Actions for Linux (x86_64 and arm64 / Raspberry Pi), macOS and
-Windows. Open the latest successful run under the repository's **Actions** tab and download the
-artifact for your system.
+Ready-made builds for Linux (x86_64 and arm64 / Raspberry Pi), macOS and Windows are on the
+[Releases page](https://github.com/audric/s1pro/releases).
 
+- **Linux**: unpack and run `./s1pro`. It needs Qt 6 and BlueZ from your distribution
+  (Debian, Ubuntu, Raspberry Pi OS: `sudo apt install libqt6widgets6 libqt6dbus6 bluez`).
 - **macOS**: unzip and open `s1pro.app`. It is not signed by an Apple developer, so the first
   time right-click it and choose Open (or run `xattr -dr com.apple.quarantine s1pro.app`).
   macOS will ask to allow Bluetooth.
