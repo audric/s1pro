@@ -1,4 +1,4 @@
-// Hytera S1 Pro (HYT-S35) programming link over Bluetooth LE, via BlueZ on D-Bus.
+// Hytera S1 Pro (HYT-S35) programming protocol, on top of the Bluetooth link in link.h.
 //
 // Protocol recovered from packet captures of the official Hytera Radio app; see docs/PROTOCOL.md.
 //
@@ -24,12 +24,8 @@
 #include <QObject>
 #include <QPair>
 #include <QString>
-#include <QVariantMap>
-#include <stdexcept>
 
-struct RadioError : std::runtime_error {
-    explicit RadioError(const QString &m) : std::runtime_error(m.toStdString()) {}
-};
+#include "link.h"
 
 using Fields = QList<QPair<quint32, QByteArray>>;   // parameter id -> raw value, in order
 
@@ -39,7 +35,7 @@ public:
     explicit Radio(QObject *parent = nullptr);
     ~Radio() override;
 
-    // Scan for an S1 Pro. Returns its address ("" if none) and sets *name.
+    // Scan for an S1 Pro. Returns its identifier for open() ("" if none) and sets *name.
     static QString find(int timeoutMs, QString *name = nullptr);
 
     void open(const QString &address);   // connect BLE, start the link, open a parameter session
@@ -59,7 +55,7 @@ public:
     void deleteZoneChannel(int zone, int entry);            // entry = position in the zone, from 0
 
 private slots:
-    void onProperties(const QString &iface, const QVariantMap &changed, const QStringList &);
+    void onReceived(const QByteArray &bytes);
 
 private:
     struct Frame { quint8 op; quint16 pn; QByteArray payload; };
@@ -70,9 +66,7 @@ private:
     QList<QList<QPair<int, int>>> readZoneChannelRange(int first, int count);
     void write(const QByteArray &item);
 
-    QString devicePath_, rxPath_, txPath_;
-    int chunk_ = 20;
-    bool connected_ = false;
+    Link *link_;
     QByteArray buffer_;
     QList<Frame> inbox_;
     quint16 pn_ = 0;

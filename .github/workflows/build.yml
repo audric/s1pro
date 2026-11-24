@@ -21,11 +21,63 @@ jobs:
       - name: Install build tools
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends g++ cmake ninja-build qt6-base-dev ca-certificates
+          apt-get install -y --no-install-recommends g++ cmake ninja-build qt6-base-dev qt6-connectivity-dev ca-certificates
       - uses: actions/checkout@v4
       - name: Build
         run: ./build.sh
+      - name: Check that the Qt Bluetooth backend also compiles
+        run: |
+          cmake -S . -B build-qt -G Ninja -DS1PRO_BLUETOOTH=qt
+          cmake --build build-qt
       - uses: actions/upload-artifact@v4
         with:
           name: s1pro-linux-${{ matrix.arch }}
           path: build/s1pro
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          modules: qtconnectivity
+          cache: true
+      - name: Build (Intel and Apple silicon)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build
+      - name: Bundle
+        run: |
+          macdeployqt build/s1pro.app
+          codesign --force --deep --sign - build/s1pro.app
+          ditto -c -k --keepParent build/s1pro.app s1pro-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s1pro-macos
+          path: s1pro-macos.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          modules: qtconnectivity
+          cache: true
+      - name: Build
+        run: |
+          cmake -S . -B build
+          cmake --build build --config Release
+      - name: Bundle
+        run: |
+          New-Item -ItemType Directory dist/s1pro | Out-Null
+          Copy-Item build/Release/s1pro.exe dist/s1pro/
+          windeployqt --release --no-translations dist/s1pro/s1pro.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s1pro-windows-x86_64
+          path: dist

@@ -41,6 +41,10 @@
 #include <QToolBar>
 #include <QVBoxLayout>
 #include <functional>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <cstdio>
+#endif
 
 // Connect, run the job, disconnect. The Bluetooth link drops now and then, so the whole job is
 // retried; every job is safe to repeat (a read, or a sync that re-reads the radio first).
@@ -893,6 +897,14 @@ static int commandLine(const QString &command)
 
 int main(int argc, char **argv)
 {
+#ifdef Q_OS_WIN
+    // A windowed program has no console; borrow the terminal it was started from, if any,
+    // so that "s1pro info" and friends can print.
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
+#endif
     const QString first = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QString();
     if (QStringList{"info", "dump", "zones", "zone-add", "zone-del"}.contains(first)) {
         QCoreApplication app(argc, argv);

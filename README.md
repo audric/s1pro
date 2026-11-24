@@ -23,16 +23,30 @@ Developed and tested against one radio: S1 Pro, 400-470 MHz, firmware A1.2.04.00
 - Most columns show the radio's stored numbers. Frequencies (MHz) and tones (Hz) are converted.
 - Adding and deleting whole zones is untested.
 - Radio-wide settings (power, keys, tones, language) are not editable yet.
-- Linux only for now, PC and Raspberry Pi (uses BlueZ). macOS and Windows need a different Bluetooth backend.
+- Developed and tested on Linux. The macOS and Windows builds are untested on real hardware.
 
 This tool writes to your radio's configuration. The commands were learned by observing the
 official app, not from documentation, so use it at your own risk and keep a saved copy of a
 known-good configuration.
 
+## Download
+
+Every commit is built by GitHub Actions for Linux (x86_64 and arm64 / Raspberry Pi), macOS and
+Windows. Open the latest successful run under the repository's **Actions** tab and download the
+artifact for your system.
+
+- **macOS**: unzip and open `s1pro.app`. It is not signed by an Apple developer, so the first
+  time right-click it and choose Open (or run `xattr -dr com.apple.quarantine s1pro.app`).
+  macOS will ask to allow Bluetooth.
+- **Windows**: unzip the folder and run `s1pro.exe`.
+
+The macOS and Windows builds use a different Bluetooth layer from the Linux one and have not
+been tested on real hardware yet; reports are welcome.
+
 ## Build
 
-Runs on Linux: a PC (x86_64) or a Raspberry Pi with 64-bit Raspberry Pi OS (arm64). The same
-script builds for whichever machine you run it on:
+Linux, on a PC (x86_64) or a Raspberry Pi with 64-bit Raspberry Pi OS (arm64). The same script
+builds for whichever machine you run it on:
 
     ./build.sh
 
@@ -42,8 +56,14 @@ It tells you if anything is missing. On Debian, Ubuntu and Raspberry Pi OS the d
 
 Running it also needs BlueZ, the standard Linux Bluetooth service (package `bluez`).
 
-Ready-made binaries for both architectures are produced by the GitHub Actions build of each
-commit.
+macOS and Windows: install Qt 6 with the Qt Bluetooth (Connectivity) module, then
+
+    cmake -S . -B build
+    cmake --build build --config Release
+
+There are two Bluetooth backends, chosen with `-DS1PRO_BLUETOOTH=`: `bluez` (default on Linux,
+talks to BlueZ directly) and `qt` (default elsewhere, uses Qt Bluetooth; also works on Linux
+with `qt6-connectivity-dev`).
 
 ## Use
 
@@ -52,6 +72,8 @@ commit.
     build/s1pro file.s1pro      open a saved configuration
     build/s1pro info            print the radio's identity and table sizes
     build/s1pro dump            print every table, tab-separated
+
+On macOS the program inside the bundle is `s1pro.app/Contents/MacOS/s1pro`.
 
 Turn the radio on with Bluetooth enabled and make sure no phone is connected to it. The first
 read scans for the radio and remembers its address.

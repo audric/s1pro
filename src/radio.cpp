@@ -1,46 +1,18 @@
 #include "radio.h"
 
 #include <algorithm>
+#include <cstdio>
 
-#include <QDBusArgument>
-#include <QDBusConnection>
-#include <QDBusInterface>
-#include <QDBusMetaType>
-#include <QDBusObjectPath>
-#include <QDBusPendingCallWatcher>
-#include <QDBusReply>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QStringDecoder>
 #include <QTimer>
 #include <QtEndian>
 
-using InterfaceList = QMap<QString, QVariantMap>;
-using ManagedObjects = QMap<QDBusObjectPath, InterfaceList>;
-Q_DECLARE_METATYPE(InterfaceList)
-Q_DECLARE_METATYPE(ManagedObjects)
-
 namespace {
-
-const char *BLUEZ = "org.bluez";
-const char *DEVICE = "org.bluez.Device1";
-const char *GATT_CHAR = "org.bluez.GattCharacteristic1";
-const char *PROPS = "org.freedesktop.DBus.Properties";
-const QString RX_UUID = "0783b03e-8535-b5a0-7140-a304d2495cba";   // laptop -> radio
-const QString TX_UUID = "0783b03e-8535-b5a0-7140-a304d2495cb8";   // radio -> laptop
-const quint16 HYTERA_MANUFACTURER = 4098;                         // seen in the S1 Pro advertisement
 
 enum : quint8 { OP_DATA = 0x00, OP_ACK = 0x10, OP_CONNECT = 0xFE, OP_ACCEPT = 0xFD };
 enum : quint16 { CMD_QUERY = 0x0003, CMD_PARAM = 0x0101, MOD_PARAM = 0x0006 };
-
-QDBusConnection bus() { return QDBusConnection::systemBus(); }
-
-void pump(int ms)
-{
-    QEventLoop loop;
-    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
-    loop.exec();
-}
 
 void be16(QByteArray &b, quint16 v) { b.append(char(v >> 8)).append(char(v)); }
 void be32(QByteArray &b, quint32 v) { be16(b, v >> 16); be16(b, v & 0xFFFF); }
@@ -77,161 +49,28 @@ QByteArray linkFrame(quint8 op, quint16 pn, const QByteArray &payload = {})
     return f;
 }
 
-ManagedObjects managedObjects()
-{
-    static bool registered = false;
-    if (!registered) {
-        qDBusRegisterMetaType<InterfaceList>();
-        qDBusRegisterMetaType<ManagedObjects>();
-        registered = true;
-    }
-    QDBusInterface om(BLUEZ, "/", "org.freedesktop.DBus.ObjectManager", bus());
-    QDBusReply<ManagedObjects> reply = om.call("GetManagedObjects");
-    if (!reply.isValid())
-        throw RadioError("cannot talk to the Bluetooth service: " + reply.error().message());
-    return reply.value();
-}
-
-QString adapterPath(const ManagedObjects &objects)
-{
-    for (auto it = objects.begin(); it != objects.end(); ++it)
-        if (it.value().contains("org.bluez.Adapter1")) {
-            if (!it.value()["org.bluez.Adapter1"].value("Powered").toBool())
-                throw RadioError("Bluetooth is switched off on this computer");
-            return it.key().path();
-        }
-    throw RadioError("this computer has no Bluetooth adapter (airplane mode?)");
-}
-
-bool hasManufacturer(const QVariant &v, quint16 wanted)
-{
-    if (!v.canConvert<QDBusArgument>())
-        return false;
-    const QDBusArgument arg = v.value<QDBusArgument>();
-    bool found = false;
-    arg.beginMap();
-    while (!arg.atEnd()) {
-        quint16 id;
-        QDBusVariant data;
-        arg.beginMapEntry();
-        arg >> id >> data;
-        arg.endMapEntry();
-        found = found || id == wanted;
-    }
-    arg.endMap();
-    return found;
-}
-
-// Runs discovery for the lifetime of the object.
-struct Discovery {
-    QDBusInterface adapter;
-    explicit Discovery(const QString &path) : adapter(BLUEZ, path, "org.bluez.Adapter1", bus())
-    {
-        adapter.call("StartDiscovery");
-    }
-    ~Discovery() { adapter.call("StopDiscovery"); }
-};
-
-QString callAndWait(QDBusInterface &iface, const QString &method, int timeoutMs)
-{
-    iface.setTimeout(timeoutMs);
-    QDBusPendingCallWatcher watcher(iface.asyncCall(method));
-    QEventLoop loop;
-    QObject::connect(&watcher, &QDBusPendingCallWatcher::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-    return watcher.isError() ? watcher.error().message() : QString();
-}
-
 } // namespace
 
-Radio::Radio(QObject *parent) : QObject(parent) {}
+void pump(int ms)
+{
+    QEventLoop loop;
+    QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+    loop.exec();
+}
+
+Radio::Radio(QObject *parent) : QObject(parent), link_(Link::create(this))
+{
+    connect(link_, &Link::received, this, &Radio::onReceived);
+}
 
 Radio::~Radio() { close(); }
 
-QString Radio::find(int timeoutMs, QString *name)
-{
-    Discovery discovery(adapterPath(managedObjects()));
-    QElapsedTimer clock;
-    clock.start();
-    while (clock.elapsed() < timeoutMs) {
-        pump(500);
-        const ManagedObjects objects = managedObjects();
-        for (auto it = objects.begin(); it != objects.end(); ++it) {
-            const QVariantMap dev = it.value().value(DEVICE);
-            // RSSI is only present for devices heard during this scan.
-            if (dev.contains("RSSI") && hasManufacturer(dev.value("ManufacturerData"), HYTERA_MANUFACTURER)) {
-                if (name)
-                    *name = dev.value("Name").toString();
-                return dev.value("Address").toString();
-            }
-        }
-    }
-    return {};
-}
+QString Radio::find(int timeoutMs, QString *name) { return Link::find(timeoutMs, name); }
 
 void Radio::open(const QString &address)
 {
     close();
-    {
-        ManagedObjects objects = managedObjects();
-        Discovery discovery(adapterPath(objects));
-        QElapsedTimer clock;
-        clock.start();
-        for (;;) {
-            for (auto it = objects.begin(); it != objects.end(); ++it) {
-                const QVariantMap dev = it.value().value(DEVICE);
-                // A device BlueZ already knows can be connected straight away; BlueZ waits for
-                // its next advertisement itself, which is quicker than us polling for it.
-                if (dev.value("Address").toString().compare(address, Qt::CaseInsensitive) == 0)
-                    devicePath_ = it.key().path();
-            }
-            if (!devicePath_.isEmpty())
-                break;
-            if (clock.elapsed() > 12000)
-                throw RadioError("radio " + address + " not found: is it on, with Bluetooth enabled "
-                                 "and no phone connected to it?");
-            pump(500);
-            objects = managedObjects();
-        }
-        QDBusInterface device(BLUEZ, devicePath_, DEVICE, bus());
-        const QString error = callAndWait(device, "Connect", 30000);
-        if (!error.isEmpty()) {
-            devicePath_.clear();
-            throw RadioError("cannot connect to the radio: " + error);
-        }
-        connected_ = true;
-    }
-
-    // Wait for GATT discovery, then locate the two characteristics.
-    QElapsedTimer clock;
-    clock.start();
-    QVariantMap rx;
-    while (rxPath_.isEmpty() || txPath_.isEmpty()) {
-        if (clock.elapsed() > 15000)
-            throw RadioError("the radio did not expose its programming service");
-        pump(300);
-        const ManagedObjects objects = managedObjects();
-        for (auto it = objects.begin(); it != objects.end(); ++it) {
-            if (!it.key().path().startsWith(devicePath_ + "/"))
-                continue;
-            const QVariantMap chr = it.value().value(GATT_CHAR);
-            if (chr.value("UUID").toString() == RX_UUID) {
-                rxPath_ = it.key().path();
-                rx = chr;
-            } else if (chr.value("UUID").toString() == TX_UUID) {
-                txPath_ = it.key().path();
-            }
-        }
-    }
-    const int mtu = rx.value("MTU").toInt();
-    chunk_ = qBound(20, (mtu ? mtu : 23) - 3, 509);
-
-    bus().connect(BLUEZ, txPath_, PROPS, "PropertiesChanged", this,
-                  SLOT(onProperties(QString, QVariantMap, QStringList)));
-    QDBusInterface tx(BLUEZ, txPath_, GATT_CHAR, bus());
-    QDBusReply<void> notify = tx.call("StartNotify");
-    if (!notify.isValid())
-        throw RadioError("cannot subscribe to the radio: " + notify.error().message());
+    link_->open(address);
 
     // The radio often misses the first connect frame; the app sends it twice too.
     bool accepted = false;
@@ -249,17 +88,7 @@ void Radio::open(const QString &address)
 
 void Radio::close()
 {
-    if (!txPath_.isEmpty())
-        bus().disconnect(BLUEZ, txPath_, PROPS, "PropertiesChanged", this,
-                         SLOT(onProperties(QString, QVariantMap, QStringList)));
-    if (connected_) {
-        QDBusInterface device(BLUEZ, devicePath_, DEVICE, bus());
-        device.call("Disconnect");
-    }
-    connected_ = false;
-    devicePath_.clear();
-    rxPath_.clear();
-    txPath_.clear();
+    link_->close();
     buffer_.clear();
     inbox_.clear();
     pn_ = 0;
@@ -276,21 +105,12 @@ static void trace(const char *direction, const QByteArray &frame)
 void Radio::sendRaw(const QByteArray &frame)
 {
     trace(">", frame);
-    QDBusInterface rx(BLUEZ, rxPath_, GATT_CHAR, bus());
-    rx.setTimeout(5000);
-    const QVariantMap options{{"type", "command"}};
-    for (int i = 0; i < frame.size(); i += chunk_) {
-        QDBusReply<void> r = rx.call("WriteValue", frame.mid(i, chunk_), options);
-        if (!r.isValid())
-            throw RadioError("Bluetooth link lost (" + r.error().message() + ")");
-    }
+    link_->send(frame);
 }
 
-void Radio::onProperties(const QString &iface, const QVariantMap &changed, const QStringList &)
+void Radio::onReceived(const QByteArray &bytes)
 {
-    if (iface != QLatin1String(GATT_CHAR) || !changed.contains("Value"))
-        return;
-    buffer_ += changed.value("Value").toByteArray();
+    buffer_ += bytes;
     for (;;) {
         const int start = buffer_.indexOf(QByteArray::fromHex("5e6e"));
         if (start < 0) {
