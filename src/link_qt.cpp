@@ -11,8 +11,10 @@
 #include <QLowEnergyService>
 #include <functional>
 #include <optional>
-#if QT_CONFIG(permissions)
+// The permission API (needed on macOS) arrived in Qt 6.5.
+#if __has_include(<QPermissions>)
 #include <QPermissions>
+#define S1PRO_PERMISSIONS 1
 #endif
 
 namespace {
@@ -49,7 +51,7 @@ bool waitFor(const std::function<bool()> &done, int timeoutMs)
 
 void ensurePermission()
 {
-#if QT_CONFIG(permissions)
+#ifdef S1PRO_PERMISSIONS
     QBluetoothPermission permission;
     permission.setCommunicationModes(QBluetoothPermission::Access);
     if (qApp->checkPermission(permission) == Qt::PermissionStatus::Undetermined) {
