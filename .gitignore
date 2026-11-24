@@ -1,0 +1,4 @@
+/build/
+# Personal and research material: your radio's contents, packet captures, VM image.
+/local/
+*.s1pro

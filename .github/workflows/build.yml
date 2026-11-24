@@ -1,0 +1,31 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64          # Raspberry Pi OS 64-bit
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # Debian 12 is what Raspberry Pi OS is based on; building there keeps the binary usable on it.
+    container: debian:bookworm
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends g++ cmake ninja-build qt6-base-dev ca-certificates
+      - uses: actions/checkout@v4
+      - name: Build
+        run: ./build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s1pro-linux-${{ matrix.arch }}
+          path: build/s1pro
