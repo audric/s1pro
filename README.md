@@ -61,3 +61,7 @@ Only one program can talk to the radio at a time; a second copy of s1pro will wa
 ## How it works
 
 See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the Bluetooth protocol.
+
+## Licence
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
