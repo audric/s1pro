@@ -5,6 +5,8 @@ It programs the radio over Bluetooth LE from a computer, so you do not need the 
 
 Unofficial. Not affiliated with or endorsed by Hytera.
 
+![The s1pro editor showing the digital channels table](docs/screenshot.png)
+
 ## What it does
 
 - Reads and writes digital channels, analog channels, contacts and zones.
